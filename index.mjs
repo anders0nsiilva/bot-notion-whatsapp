@@ -1,56 +1,35 @@
-/**
- * Servidor de Integração v2: Notion-WhatsApp com Resposta Automática
- *
- * Funcionalidades:
- * 1. Recebe mensagens do WhatsApp via Webhook.
- * 2. Valida o webhook da Meta com uma rota GET.
- * 3. Processa mensagens de texto no formato "Descrição, Valor, Categoria, Tipo".
- * 4. Cria uma nova entrada na base de dados do Notion.
- * 5. Após criar, consulta o Notion para calcular o total de gastos para o "Tipo" informado.
- * 6. Envia uma mensagem de resposta no WhatsApp com o total calculado.
- */
-
 // Importa as bibliotecas necessárias.
 import express from "express";
 import fetch from "node-fetch";
 
-// Inicializa a aplicação Express.
+// --- CONFIGURAÇÃO INICIAL ---
 const app = express();
 app.use(express.json());
 
-// --- CARREGAMENTO DE CHAVES SECRETAS (VARIÁVEIS DE AMBIENTE) ---
-// Chaves para a API do Notion
+// Carrega as chaves secretas a partir das Variáveis de Ambiente do Render.
 const NOTION_TOKEN = process.env.NOTION_TOKEN;
 const DATABASE_ID = process.env.DATABASE_ID;
-
-// Chaves para a API do WhatsApp (Meta)
+const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const WHATSAPP_PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID;
-const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 
-
-// --- FUNÇÕES DE INTERAÇÃO COM APIS EXTERNAS ---
+// --- FUNÇÕES DE LÓGICA DE NEGÓCIO ---
 
 /**
- * Cria uma nova entrada (página) na base de dados do Notion.
- * @param {string} descricao - A descrição da despesa.
- * @param {number} valor - O valor numérico da despesa.
- * @param {string} categoria - A categoria da despesa.
- * @param {string} tipo - O tipo de pagamento (ex: Crédito, Débito, Pix).
+ * Cria uma nova página (entrada) na base de dados do Notion.
  */
-async function criarEntradaNotion(descricao, valor, categoria, tipo) {
-  console.log("Criando entrada no Notion...");
+async function criarEntrada(descricao, valor, categoria, tipo) {
   const payload = {
     parent: { database_id: DATABASE_ID },
     properties: {
       "Descrição": { title: [{ text: { content: descricao } }] },
       "Valor": { number: valor },
       "Categoria": { select: { name: categoria } },
-      "Tipo": { select: { name: tipo } }, // Nova propriedade "Tipo"
+      "Tipo": { select: { name: tipo } },
     },
   };
-
-  const response = await fetch("https://api.notion.com/v1/pages", {
+  // (O resto da função continua igual)
+  const resposta = await fetch("https://api.notion.com/v1/pages", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${NOTION_TOKEN}`,
@@ -59,84 +38,81 @@ async function criarEntradaNotion(descricao, valor, categoria, tipo) {
     },
     body: JSON.stringify(payload),
   });
-
-  return response.json();
+  return await resposta.json();
 }
 
 /**
- * Consulta a base de dados do Notion para somar os valores de um tipo de pagamento.
- * @param {string} tipoPagamento - O tipo de pagamento a ser filtrado (ex: "Crédito").
- * @returns {Promise<number>} - A soma total dos valores para o tipo especificado.
+ * Consulta o Notion e calcula a soma de todos os gastos de um determinado "Tipo".
  */
-async function calcularTotalPorTipo(tipoPagamento) {
-  console.log(`Consultando Notion para o total de: ${tipoPagamento}`);
+async function calcularTotalPorTipo(tipo) {
   const payload = {
     filter: {
       property: "Tipo",
       select: {
-        equals: tipoPagamento,
+        equals: tipo,
       },
     },
   };
 
-  const response = await fetch(`https://api.notion.com/v1/databases/${DATABASE_ID}/query`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${NOTION_TOKEN}`,
-      "Content-Type": "application/json",
-      "Notion-Version": "2022-06-28",
-    },
-    body: JSON.stringify(payload),
-  });
-
-  const data = await response.json();
-
-  // Soma a propriedade "Valor" de cada item retornado pela consulta.
-  const total = data.results.reduce((sum, page) => {
-    const valorProperty = page.properties.Valor;
-    if (valorProperty && valorProperty.number !== null) {
-      return sum + valorProperty.number;
+  const resposta = await fetch(
+    `https://api.notion.com/v1/databases/${DATABASE_ID}/query`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${NOTION_TOKEN}`,
+        "Content-Type": "application/json",
+        "Notion-Version": "2022-06-28",
+      },
+      body: JSON.stringify(payload),
     }
-    return sum;
+  );
+
+  const dados = await resposta.json();
+
+  // ***** AJUSTE DE ROBUSTEZ *****
+  // Verifica se a resposta do Notion foi bem-sucedida e contém a lista "results".
+  if (!dados.results) {
+    console.error("Erro ao consultar o Notion. Resposta recebida:", JSON.stringify(dados, null, 2));
+    // Retorna 0 para não quebrar a aplicação, mesmo que a consulta falhe.
+    return 0;
+  }
+
+  // Soma a propriedade "Valor" de cada item retornado.
+  const total = dados.results.reduce((soma, item) => {
+    // Adiciona uma verificação para garantir que a propriedade existe antes de somar.
+    const valorItem = item.properties?.Valor?.number || 0;
+    return soma + valorItem;
   }, 0);
 
   return total;
 }
 
 /**
- * Envia uma mensagem de texto de volta para o usuário no WhatsApp.
- * @param {string} recipientId - O número de telefone do destinatário.
- * @param {string} messageText - O texto da mensagem a ser enviada.
+ * Envia uma mensagem de resposta para o usuário via API do WhatsApp.
  */
-async function enviarMensagemWhatsApp(recipientId, messageText) {
-  console.log(`Enviando resposta para ${recipientId}: "${messageText}"`);
+async function enviarMensagemWhatsApp(para, texto) {
   const payload = {
     messaging_product: "whatsapp",
-    to: recipientId,
-    text: { body: messageText },
+    to: para,
+    text: { body: texto },
   };
 
-  try {
-    const response = await fetch(`https://graph.facebook.com/v20.0/${WHATSAPP_PHONE_NUMBER_ID}/messages`, {
+  await fetch(
+    `https://graph.facebook.com/v18.0/${WHATSAPP_PHONE_NUMBER_ID}/messages`,
+    {
       method: "POST",
       headers: {
         Authorization: `Bearer ${WHATSAPP_TOKEN}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify(payload),
-    });
-    
-    const responseData = await response.json();
-    console.log("Resposta da API do WhatsApp:", responseData);
-  } catch (error) {
-    console.error("Erro ao enviar mensagem no WhatsApp:", error);
-  }
+    }
+  );
 }
 
+// --- ROTAS DA API ---
 
-// --- ROTAS DO SERVIDOR ---
-
-// Rota GET para verificação do Webhook da Meta.
+// Rota para a verificação do Webhook (requisição GET)
 app.get("/notion", (req, res) => {
   if (
     req.query["hub.mode"] === "subscribe" &&
@@ -148,7 +124,7 @@ app.get("/notion", (req, res) => {
   }
 });
 
-// Rota POST principal para receber mensagens do WhatsApp.
+// Rota principal para receber as mensagens do WhatsApp (requisição POST)
 app.post("/notion", async (req, res) => {
   console.log("Webhook recebido:", JSON.stringify(req.body, null, 2));
 
@@ -159,18 +135,17 @@ app.post("/notion", async (req, res) => {
       console.log("Não é uma mensagem de texto ou formato desconhecido.");
       return res.sendStatus(200);
     }
-
+    
     const textoDaMensagem = messageObject.text.body;
-    const remetente = messageObject.from; // Número de quem enviou a mensagem
-    console.log(`Texto extraído de ${remetente}: ${textoDaMensagem}`);
+    const numeroRemetente = messageObject.from;
+    console.log(`Texto extraído de ${numeroRemetente}: ${textoDaMensagem}`);
 
-    // NOVO FORMATO: "Descrição, Valor, Categoria, Tipo"
     const partes = textoDaMensagem.split(",").map(part => part.trim());
 
     if (partes.length !== 4) {
       console.log("A mensagem não está no formato esperado (Descrição, Valor, Categoria, Tipo).");
-      const formatoCorreto = "Formato esperado: Descrição, Valor, Categoria, Tipo de Pagamento (Ex: Crédito, Débito, Pix)";
-      await enviarMensagemWhatsApp(remetente, formatoCorreto);
+      const respostaErro = `Formato inválido. Use: Descrição, Valor, Categoria, Tipo de Pagamento.`;
+      await enviarMensagemWhatsApp(numeroRemetente, respostaErro);
       return res.sendStatus(200);
     }
 
@@ -178,22 +153,23 @@ app.post("/notion", async (req, res) => {
     const valor = parseFloat(valorStr.replace(",", "."));
 
     if (isNaN(valor)) {
-      console.log(`O valor "${valorStr}" não é um número válido.`);
-      await enviarMensagemWhatsApp(remetente, `O valor "${valorStr}" não é um número válido.`);
-      return res.sendStatus(200);
+        const respostaErro = `O valor "${valorStr}" não é um número. Tente novamente.`;
+        await enviarMensagemWhatsApp(numeroRemetente, respostaErro);
+        return res.sendStatus(200);
     }
 
-    // 1. Cria a entrada no Notion
-    await criarEntradaNotion(descricao, valor, categoria, tipo);
+    console.log("Criando entrada no Notion...");
+    await criarEntrada(descricao, valor, categoria, tipo);
+    const gastoFormatado = valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
-    // 2. Calcula o total para o tipo de pagamento informado
+    console.log(`Consultando Notion para o total de: ${tipo}`);
     const totalPorTipo = await calcularTotalPorTipo(tipo);
+    const totalFormatado = totalPorTipo.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
-    // 3. Formata a mensagem de resposta
-    const resposta = `✅ Gasto de R$ ${valor.toFixed(2)} registrado! \n\nTotal de gastos com ${tipo}: R$ ${totalPorTipo.toFixed(2)}`;
+    const textoResposta = `✅ Gasto de ${gastoFormatado} registrado!\n\nTotal de gastos com ${tipo}: ${totalFormatado}`;
 
-    // 4. Envia a resposta de volta para o WhatsApp
-    await enviarMensagemWhatsApp(remetente, resposta);
+    console.log(`Enviando resposta para ${numeroRemetente}: ${textoResposta}`);
+    await enviarMensagemWhatsApp(numeroRemetente, textoResposta);
 
     res.sendStatus(200);
 
