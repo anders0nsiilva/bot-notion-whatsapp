@@ -17,7 +17,7 @@ const WHATSAPP_PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID;
 
 /**
  * Cria uma nova página (entrada) na base de dados do Notion.
- * AJUSTADO: A propriedade "Tipo" agora usa a sintaxe de 'multi_select'.
+ * AJUSTADO: Corrige o erro "body used already".
  */
 async function criarEntrada(descricao, valor, categoria, tipo) {
   const payload = {
@@ -26,7 +26,6 @@ async function criarEntrada(descricao, valor, categoria, tipo) {
       "Descrição": { title: [{ text: { content: descricao } }] },
       "Valor": { number: valor },
       "Categoria": { select: { name: categoria } },
-      // CORREÇÃO: Propriedades 'multi_select' esperam um array de objetos.
       "Tipo": { multi_select: [{ name: tipo }] },
     },
   };
@@ -41,24 +40,25 @@ async function criarEntrada(descricao, valor, categoria, tipo) {
     body: JSON.stringify(payload ),
   });
 
-  // Adiciona log para depuração em caso de erro na criação
+  // CORREÇÃO: Lê o corpo da resposta apenas UMA VEZ e armazena em uma variável.
+  const dadosResposta = await resposta.json();
+
+  // Usa a variável para verificar se houve erro e para fazer o log.
   if (!resposta.ok) {
-    const erro = await resposta.json();
-    console.error("Erro ao criar entrada no Notion:", JSON.stringify(erro, null, 2));
+    console.error("Erro ao criar entrada no Notion:", JSON.stringify(dadosResposta, null, 2));
   }
   
-  return await resposta.json();
+  // Retorna a mesma variável.
+  return dadosResposta;
 }
 
 /**
  * Consulta o Notion e calcula a soma de todos os gastos de um determinado "Tipo".
- * AJUSTADO: O filtro agora usa a sintaxe de 'multi_select' com 'contains'.
  */
 async function calcularTotalPorTipo(tipo) {
   const payload = {
     filter: {
       property: "Tipo",
-      // CORREÇÃO: A sintaxe para 'multi_select' usa "contains" em vez de "equals".
       multi_select: {
         contains: tipo,
       },
@@ -118,7 +118,6 @@ async function enviarMensagemWhatsApp(para, texto) {
 
 // --- ROTAS DA API ---
 
-// Rota para verificação do Webhook do WhatsApp
 app.get("/notion", (req, res) => {
   if (
     req.query["hub.mode"] === "subscribe" &&
@@ -130,7 +129,6 @@ app.get("/notion", (req, res) => {
   }
 });
 
-// Rota principal que recebe as mensagens do WhatsApp
 app.post("/notion", async (req, res) => {
   console.log("Webhook recebido:", JSON.stringify(req.body, null, 2));
 
@@ -156,7 +154,6 @@ app.post("/notion", async (req, res) => {
 
     let [descricao, valorStr, categoria, tipo] = partes;
     
-    // Padroniza a capitalização para corresponder às opções do Notion (Ex: "crédito" -> "Crédito")
     categoria = categoria.charAt(0).toUpperCase() + categoria.slice(1).toLowerCase();
     tipo = tipo.charAt(0).toUpperCase() + tipo.slice(1).toLowerCase();
 
@@ -169,7 +166,16 @@ app.post("/notion", async (req, res) => {
     }
 
     console.log("Criando entrada no Notion...");
-    await criarEntrada(descricao, valor, categoria, tipo);
+    const resultadoCriacao = await criarEntrada(descricao, valor, categoria, tipo);
+
+    // Verifica se a criação da entrada falhou
+    if (resultadoCriacao.object === 'error') {
+        console.log(`Falha ao registrar no Notion. O erro já foi logado na função 'criarEntrada'.`);
+        // Opcional: Enviar uma mensagem de erro para o usuário
+        // await enviarMensagemWhatsApp(numeroRemetente, `Ocorreu um erro ao registrar seu gasto. Tente novamente.`);
+        return res.sendStatus(200); // Encerra para evitar que o código continue
+    }
+
     const gastoFormatado = valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
     console.log(`Consultando Notion para o total de: ${tipo}`);
