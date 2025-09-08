@@ -17,7 +17,7 @@ const WHATSAPP_PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID;
 
 /**
  * Cria uma nova página (entrada) na base de dados do Notion.
- * AJUSTADO: Corrige o erro "body used already".
+ * CORREÇÃO FINAL: A propriedade "Tipo" é do tipo 'select'.
  */
 async function criarEntrada(descricao, valor, categoria, tipo) {
   const payload = {
@@ -26,7 +26,8 @@ async function criarEntrada(descricao, valor, categoria, tipo) {
       "Descrição": { title: [{ text: { content: descricao } }] },
       "Valor": { number: valor },
       "Categoria": { select: { name: categoria } },
-      "Tipo": { multi_select: [{ name: tipo }] },
+      // CORREÇÃO: Usando a sintaxe para 'select' (Seleção Simples).
+      "Tipo": { select: { name: tipo } },
     },
   };
 
@@ -40,27 +41,24 @@ async function criarEntrada(descricao, valor, categoria, tipo) {
     body: JSON.stringify(payload ),
   });
 
-  // CORREÇÃO: Lê o corpo da resposta apenas UMA VEZ e armazena em uma variável.
   const dadosResposta = await resposta.json();
-
-  // Usa a variável para verificar se houve erro e para fazer o log.
   if (!resposta.ok) {
     console.error("Erro ao criar entrada no Notion:", JSON.stringify(dadosResposta, null, 2));
   }
-  
-  // Retorna a mesma variável.
   return dadosResposta;
 }
 
 /**
  * Consulta o Notion e calcula a soma de todos os gastos de um determinado "Tipo".
+ * CORREÇÃO FINAL: O filtro para 'select' usa 'equals'.
  */
 async function calcularTotalPorTipo(tipo) {
   const payload = {
     filter: {
       property: "Tipo",
-      multi_select: {
-        contains: tipo,
+      // CORREÇÃO: A sintaxe para filtro de 'select' usa "equals".
+      select: {
+        equals: tipo,
       },
     },
   };
@@ -168,12 +166,10 @@ app.post("/notion", async (req, res) => {
     console.log("Criando entrada no Notion...");
     const resultadoCriacao = await criarEntrada(descricao, valor, categoria, tipo);
 
-    // Verifica se a criação da entrada falhou
     if (resultadoCriacao.object === 'error') {
         console.log(`Falha ao registrar no Notion. O erro já foi logado na função 'criarEntrada'.`);
-        // Opcional: Enviar uma mensagem de erro para o usuário
-        // await enviarMensagemWhatsApp(numeroRemetente, `Ocorreu um erro ao registrar seu gasto. Tente novamente.`);
-        return res.sendStatus(200); // Encerra para evitar que o código continue
+        await enviarMensagemWhatsApp(numeroRemetente, `❌ Erro ao registrar: a opção "${tipo}" pode não existir na coluna "Tipo". Verifique o Notion.`);
+        return res.sendStatus(200);
     }
 
     const gastoFormatado = valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
