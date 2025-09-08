@@ -28,7 +28,7 @@ async function criarEntrada(descricao, valor, categoria, tipo) {
       "Tipo": { select: { name: tipo } },
     },
   };
-  // (O resto da função continua igual)
+
   const resposta = await fetch("https://api.notion.com/v1/pages", {
     method: "POST",
     headers: {
@@ -69,17 +69,12 @@ async function calcularTotalPorTipo(tipo) {
 
   const dados = await resposta.json();
 
-  // ***** AJUSTE DE ROBUSTEZ *****
-  // Verifica se a resposta do Notion foi bem-sucedida e contém a lista "results".
   if (!dados.results) {
     console.error("Erro ao consultar o Notion. Resposta recebida:", JSON.stringify(dados, null, 2));
-    // Retorna 0 para não quebrar a aplicação, mesmo que a consulta falhe.
     return 0;
   }
 
-  // Soma a propriedade "Valor" de cada item retornado.
   const total = dados.results.reduce((soma, item) => {
-    // Adiciona uma verificação para garantir que a propriedade existe antes de somar.
     const valorItem = item.properties?.Valor?.number || 0;
     return soma + valorItem;
   }, 0);
@@ -112,7 +107,6 @@ async function enviarMensagemWhatsApp(para, texto) {
 
 // --- ROTAS DA API ---
 
-// Rota para a verificação do Webhook (requisição GET)
 app.get("/notion", (req, res) => {
   if (
     req.query["hub.mode"] === "subscribe" &&
@@ -124,7 +118,6 @@ app.get("/notion", (req, res) => {
   }
 });
 
-// Rota principal para receber as mensagens do WhatsApp (requisição POST)
 app.post("/notion", async (req, res) => {
   console.log("Webhook recebido:", JSON.stringify(req.body, null, 2));
 
@@ -143,13 +136,19 @@ app.post("/notion", async (req, res) => {
     const partes = textoDaMensagem.split(",").map(part => part.trim());
 
     if (partes.length !== 4) {
-      console.log("A mensagem não está no formato esperado (Descrição, Valor, Categoria, Tipo).");
       const respostaErro = `Formato inválido. Use: Descrição, Valor, Categoria, Tipo de Pagamento.`;
       await enviarMensagemWhatsApp(numeroRemetente, respostaErro);
       return res.sendStatus(200);
     }
 
-    const [descricao, valorStr, categoria, tipo] = partes;
+    let [descricao, valorStr, categoria, tipo] = partes;
+    
+    // ***** AJUSTE DE CAPITALIZAÇÃO *****
+    // Pega a primeira letra, a torna maiúscula e junta com o resto da palavra.
+    // Ex: "crédito" -> "Crédito" | "saúde" -> "Saúde"
+    categoria = categoria.charAt(0).toUpperCase() + categoria.slice(1).toLowerCase();
+    tipo = tipo.charAt(0).toUpperCase() + tipo.slice(1).toLowerCase();
+
     const valor = parseFloat(valorStr.replace(",", "."));
 
     if (isNaN(valor)) {
