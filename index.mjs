@@ -17,6 +17,7 @@ const WHATSAPP_PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID;
 
 /**
  * Cria uma nova página (entrada) na base de dados do Notion.
+ * AJUSTADO: A propriedade "Tipo" agora usa a sintaxe de 'multi_select'.
  */
 async function criarEntrada(descricao, valor, categoria, tipo) {
   const payload = {
@@ -25,7 +26,8 @@ async function criarEntrada(descricao, valor, categoria, tipo) {
       "Descrição": { title: [{ text: { content: descricao } }] },
       "Valor": { number: valor },
       "Categoria": { select: { name: categoria } },
-      "Tipo": { select: { name: tipo } },
+      // CORREÇÃO: Propriedades 'multi_select' esperam um array de objetos.
+      "Tipo": { multi_select: [{ name: tipo }] },
     },
   };
 
@@ -36,20 +38,29 @@ async function criarEntrada(descricao, valor, categoria, tipo) {
       "Content-Type": "application/json",
       "Notion-Version": "2022-06-28",
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(payload ),
   });
+
+  // Adiciona log para depuração em caso de erro na criação
+  if (!resposta.ok) {
+    const erro = await resposta.json();
+    console.error("Erro ao criar entrada no Notion:", JSON.stringify(erro, null, 2));
+  }
+  
   return await resposta.json();
 }
 
 /**
  * Consulta o Notion e calcula a soma de todos os gastos de um determinado "Tipo".
+ * AJUSTADO: O filtro agora usa a sintaxe de 'multi_select' com 'contains'.
  */
 async function calcularTotalPorTipo(tipo) {
   const payload = {
     filter: {
       property: "Tipo",
-      select: {
-        equals: tipo,
+      // CORREÇÃO: A sintaxe para 'multi_select' usa "contains" em vez de "equals".
+      multi_select: {
+        contains: tipo,
       },
     },
   };
@@ -63,7 +74,7 @@ async function calcularTotalPorTipo(tipo) {
         "Content-Type": "application/json",
         "Notion-Version": "2022-06-28",
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(payload ),
     }
   );
 
@@ -100,13 +111,14 @@ async function enviarMensagemWhatsApp(para, texto) {
         Authorization: `Bearer ${WHATSAPP_TOKEN}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(payload ),
     }
   );
 }
 
 // --- ROTAS DA API ---
 
+// Rota para verificação do Webhook do WhatsApp
 app.get("/notion", (req, res) => {
   if (
     req.query["hub.mode"] === "subscribe" &&
@@ -118,6 +130,7 @@ app.get("/notion", (req, res) => {
   }
 });
 
+// Rota principal que recebe as mensagens do WhatsApp
 app.post("/notion", async (req, res) => {
   console.log("Webhook recebido:", JSON.stringify(req.body, null, 2));
 
@@ -143,9 +156,7 @@ app.post("/notion", async (req, res) => {
 
     let [descricao, valorStr, categoria, tipo] = partes;
     
-    // ***** AJUSTE DE CAPITALIZAÇÃO *****
-    // Pega a primeira letra, a torna maiúscula e junta com o resto da palavra.
-    // Ex: "crédito" -> "Crédito" | "saúde" -> "Saúde"
+    // Padroniza a capitalização para corresponder às opções do Notion (Ex: "crédito" -> "Crédito")
     categoria = categoria.charAt(0).toUpperCase() + categoria.slice(1).toLowerCase();
     tipo = tipo.charAt(0).toUpperCase() + tipo.slice(1).toLowerCase();
 
