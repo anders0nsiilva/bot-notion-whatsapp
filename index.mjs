@@ -1,5 +1,4 @@
 // Importa as bibliotecas necessárias.
-// A 'googleapis' é a biblioteca oficial do Google para aceder às suas APIs.
 import express from "express";
 import { google } from "googleapis";
 
@@ -15,7 +14,7 @@ const WHATSAPP_PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID;
 // Carrega as credenciais para a API do Google Sheets.
 const GOOGLE_SHEET_ID = process.env.GOOGLE_SHEET_ID;
 const GOOGLE_SERVICE_ACCOUNT_EMAIL = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-// A chave privada precisa de ser formatada corretamente para ser lida como variável de ambiente.
+// CORREÇÃO CRÍTICA: A chave privada precisa ser formatada corretamente.
 const GOOGLE_PRIVATE_KEY = process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n');
 
 // --- FUNÇÕES DE LÓGICA DE NEGÓCIO (VERSÃO GOOGLE SHEETS) ---
@@ -24,20 +23,18 @@ const GOOGLE_PRIVATE_KEY = process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n');
  * Adiciona uma nova linha de dados na planilha do Google Sheets.
  */
 async function adicionarLinhaNaPlanilha(descricao, valor, categoria, tipo) {
-  // Autenticação com a API do Google
   const auth = new google.auth.GoogleAuth({
     credentials: {
       client_email: GOOGLE_SERVICE_ACCOUNT_EMAIL,
       private_key: GOOGLE_PRIVATE_KEY,
     },
     scopes: ["https://www.googleapis.com/auth/spreadsheets"],
-  });
+  } );
 
   const sheets = google.sheets({ version: "v4", auth });
 
-  // Prepara a linha a ser inserida. A data é adicionada automaticamente.
   const novaLinha = [
-    new Date().toISOString(), // Coluna A: Data e Hora
+    new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" }), // Coluna A: Data e Hora (fuso horário do Brasil)
     descricao,               // Coluna B: Descrição
     valor,                   // Coluna C: Valor
     categoria,               // Coluna D: Categoria
@@ -46,7 +43,7 @@ async function adicionarLinhaNaPlanilha(descricao, valor, categoria, tipo) {
 
   await sheets.spreadsheets.values.append({
     spreadsheetId: GOOGLE_SHEET_ID,
-    range: "Página1!A:E", // Assumindo que o separador se chama 'Página1'
+    range: "Página1!A:E", // Verifique se o nome da sua aba é "Página1"
     valueInputOption: "USER_ENTERED",
     resource: {
       values: [novaLinha],
@@ -64,13 +61,13 @@ async function calcularTotalPorTipoNaPlanilha(tipo) {
       private_key: GOOGLE_PRIVATE_KEY,
     },
     scopes: ["https://www.googleapis.com/auth/spreadsheets"],
-  });
+  } );
 
   const sheets = google.sheets({ version: "v4", auth });
 
   const resposta = await sheets.spreadsheets.values.get({
     spreadsheetId: GOOGLE_SHEET_ID,
-    range: "Página1!C:E", // Obtém apenas as colunas Valor, Categoria e Tipo
+    range: "Página1!C:E", // Obtém as colunas Valor (C) e Tipo (E)
   });
 
   const linhas = resposta.data.values;
@@ -79,12 +76,10 @@ async function calcularTotalPorTipoNaPlanilha(tipo) {
     return 0;
   }
 
-  // O reduce soma os valores. Itera por cada linha, verifica se o tipo
-  // na coluna E (índice 2) é o que procuramos e, se for, soma o valor da coluna C (índice 0).
   const total = linhas.reduce((soma, linha) => {
-    // Garante que a linha e as colunas existem antes de tentar aceder-lhes.
-    if (linha && linha.length > 2) {
-      const valorDaLinha = parseFloat(String(linha[0]).replace(",", ".") || 0);
+    if (linha && linha.length >= 3) { // Garante que a linha tem pelo menos 3 colunas (C, D, E)
+      const valorDaLinhaStr = String(linha[0]).replace("R$", "").replace(".", "").replace(",", ".").trim();
+      const valorDaLinha = parseFloat(valorDaLinhaStr);
       const tipoDaLinha = linha[2];
 
       if (tipoDaLinha && tipoDaLinha.toLowerCase() === tipo.toLowerCase() && !isNaN(valorDaLinha)) {
@@ -99,7 +94,6 @@ async function calcularTotalPorTipoNaPlanilha(tipo) {
 
 /**
  * Envia uma mensagem de resposta para o utilizador via API do WhatsApp.
- * (Esta função não muda)
  */
 async function enviarMensagemWhatsApp(para, texto) {
   const payload = {
@@ -108,25 +102,32 @@ async function enviarMensagemWhatsApp(para, texto) {
     text: { body: texto },
   };
 
-  const response = await fetch(
-    `https://graph.facebook.com/v18.0/${WHATSAPP_PHONE_NUMBER_ID}/messages`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${WHATSAPP_TOKEN}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
+  try {
+    const response = await fetch(
+      `https://graph.facebook.com/v20.0/${WHATSAPP_PHONE_NUMBER_ID}/messages`, // Usando a v20.0, a mais recente
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload ),
+      }
+    );
+    const data = await response.json();
+    if (data.error) {
+        console.error("<- ERRO da API do WhatsApp:", JSON.stringify(data, null, 2));
+    } else {
+        console.log("<- SUCESSO da API do WhatsApp:", JSON.stringify(data, null, 2));
     }
-  );
-  const data = await response.json();
-  console.log("<- Resposta da API do WhatsApp:", data);
+  } catch (error) {
+      console.error("<- FALHA CRÍTICA ao contatar a API do WhatsApp:", error.message);
+  }
 }
 
-// --- ROTAS DA API (A LÓGICA PRINCIPAL) ---
+// --- ROTAS DA API ---
 
-// Rota para a verificação do Webhook (NÃO MUDA)
-// IMPORTANTE: A rota agora é /webhook para evitar conflitos.
+// Rota para a verificação do Webhook
 app.get("/webhook", (req, res) => {
     if (
         req.query["hub.mode"] === "subscribe" &&
@@ -162,7 +163,6 @@ app.post("/webhook", async (req, res) => {
 
     let [descricao, valorStr, categoria, tipo] = partes;
     
-    // Capitaliza a primeira letra para consistência
     categoria = categoria.charAt(0).toUpperCase() + categoria.slice(1).toLowerCase();
     tipo = tipo.charAt(0).toUpperCase() + tipo.slice(1).toLowerCase();
 
@@ -190,14 +190,13 @@ app.post("/webhook", async (req, res) => {
     res.sendStatus(200);
 
   } catch (err) {
-    console.error("Erro na rota /webhook:", err.message);
+    console.error("Erro na rota /webhook:", err.message, err.stack);
     res.sendStatus(500);
   }
 });
 
-// --- INICIALIZAÇÃO DO SERVIDOR (NÃO MUDA) ---
+// --- INICIALIZAÇÃO DO SERVIDOR ---
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
   console.log(`Servidor a correr na porta ${PORT}`);
 });
-
