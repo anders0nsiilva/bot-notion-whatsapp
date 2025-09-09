@@ -1,17 +1,16 @@
 {
-  "name": "notion-whatsapp-bot",
+  "name": "bot-sheets-whatsapp",
   "version": "1.0.0",
-  "main": "index.js",
+  "description": "Bot que integra WhatsApp com Google Sheets",
+  "main": "index.mjs",
+  "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node index.mjs"
   },
-  "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "body-parser": "^2.2.0",
-    "express": "^5.1.0",
-    "node-fetch": "^3.3.2"
-  },
-  "description": ""
+    "express": "^4.19.2",
+    "googleapis": "^140.0.0"
+  }
 }
