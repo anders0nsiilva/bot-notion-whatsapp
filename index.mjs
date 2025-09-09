@@ -1,5 +1,5 @@
 // Importa as bibliotecas necessárias.
-// A 'googleapis' é a biblioteca oficial do Google para acessar suas APIs.
+// A 'googleapis' é a biblioteca oficial do Google para aceder às suas APIs.
 import express from "express";
 import { google } from "googleapis";
 
@@ -15,7 +15,7 @@ const WHATSAPP_PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID;
 // Carrega as credenciais para a API do Google Sheets.
 const GOOGLE_SHEET_ID = process.env.GOOGLE_SHEET_ID;
 const GOOGLE_SERVICE_ACCOUNT_EMAIL = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-// A chave privada precisa ser formatada corretamente para ser lida como variável de ambiente.
+// A chave privada precisa de ser formatada corretamente para ser lida como variável de ambiente.
 const GOOGLE_PRIVATE_KEY = process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n');
 
 // --- FUNÇÕES DE LÓGICA DE NEGÓCIO (VERSÃO GOOGLE SHEETS) ---
@@ -46,7 +46,7 @@ async function adicionarLinhaNaPlanilha(descricao, valor, categoria, tipo) {
 
   await sheets.spreadsheets.values.append({
     spreadsheetId: GOOGLE_SHEET_ID,
-    range: "Página1!A:E", // Assumindo que a aba se chama 'Página1'
+    range: "Página1!A:E", // Assumindo que o separador se chama 'Página1'
     valueInputOption: "USER_ENTERED",
     resource: {
       values: [novaLinha],
@@ -70,7 +70,7 @@ async function calcularTotalPorTipoNaPlanilha(tipo) {
 
   const resposta = await sheets.spreadsheets.values.get({
     spreadsheetId: GOOGLE_SHEET_ID,
-    range: "Página1!C:E", // Pega apenas as colunas Valor, Categoria e Tipo
+    range: "Página1!C:E", // Obtém apenas as colunas Valor, Categoria e Tipo
   });
 
   const linhas = resposta.data.values;
@@ -79,14 +79,17 @@ async function calcularTotalPorTipoNaPlanilha(tipo) {
     return 0;
   }
 
-  // O reduce soma os valores. Ele itera por cada linha, verifica se o tipo
-  // na coluna E (índice 2) é o que procuramos, e se for, soma o valor da coluna C (índice 0).
+  // O reduce soma os valores. Itera por cada linha, verifica se o tipo
+  // na coluna E (índice 2) é o que procuramos e, se for, soma o valor da coluna C (índice 0).
   const total = linhas.reduce((soma, linha) => {
-    const valorDaLinha = parseFloat(linha[0]?.replace(",", ".") || 0);
-    const tipoDaLinha = linha[2];
+    // Garante que a linha e as colunas existem antes de tentar aceder-lhes.
+    if (linha && linha.length > 2) {
+      const valorDaLinha = parseFloat(String(linha[0]).replace(",", ".") || 0);
+      const tipoDaLinha = linha[2];
 
-    if (tipoDaLinha === tipo && !isNaN(valorDaLinha)) {
-      return soma + valorDaLinha;
+      if (tipoDaLinha && tipoDaLinha.toLowerCase() === tipo.toLowerCase() && !isNaN(valorDaLinha)) {
+        return soma + valorDaLinha;
+      }
     }
     return soma;
   }, 0);
@@ -95,18 +98,44 @@ async function calcularTotalPorTipoNaPlanilha(tipo) {
 }
 
 /**
- * Envia uma mensagem de resposta para o usuário via API do WhatsApp.
+ * Envia uma mensagem de resposta para o utilizador via API do WhatsApp.
  * (Esta função não muda)
  */
 async function enviarMensagemWhatsApp(para, texto) {
-  // ... (código da função continua o mesmo da versão anterior)
+  const payload = {
+    messaging_product: "whatsapp",
+    to: para,
+    text: { body: texto },
+  };
+
+  const response = await fetch(
+    `https://graph.facebook.com/v18.0/${WHATSAPP_PHONE_NUMBER_ID}/messages`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    }
+  );
+  const data = await response.json();
+  console.log("<- Resposta da API do WhatsApp:", data);
 }
 
 // --- ROTAS DA API (A LÓGICA PRINCIPAL) ---
 
-// Rota para a verificação do Webhook (não muda)
+// Rota para a verificação do Webhook (NÃO MUDA)
+// IMPORTANTE: A rota agora é /webhook para evitar conflitos.
 app.get("/webhook", (req, res) => {
-    // ... (código da rota continua o mesmo da versão anterior)
+    if (
+        req.query["hub.mode"] === "subscribe" &&
+        req.query["hub.verify_token"] === VERIFY_TOKEN
+      ) {
+        res.send(req.query["hub.challenge"]);
+      } else {
+        res.sendStatus(400);
+      }
 });
 
 // Rota para receber as mensagens do WhatsApp
@@ -126,7 +155,7 @@ app.post("/webhook", async (req, res) => {
     const partes = textoDaMensagem.split(",").map(part => part.trim());
 
     if (partes.length !== 4) {
-        const respostaErro = `Formato inválido. Use: Descrição, Valor, Categoria, Tipo de Pagamento.`;
+        const respostaErro = `Formato inválido. Utilize:\nDescrição, Valor, Categoria, Tipo de Pagamento`;
         await enviarMensagemWhatsApp(numeroRemetente, respostaErro);
         return res.sendStatus(200);
     }
@@ -145,17 +174,17 @@ app.post("/webhook", async (req, res) => {
         return res.sendStatus(200);
     }
 
-    console.log("Adicionando linha na planilha...");
+    console.log("A adicionar linha na planilha...");
     await adicionarLinhaNaPlanilha(descricao, valor, categoria, tipo);
     const gastoFormatado = valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
-    console.log(`Consultando planilha para o total de: ${tipo}`);
+    console.log(`A consultar planilha para o total de: ${tipo}`);
     const totalPorTipo = await calcularTotalPorTipoNaPlanilha(tipo);
     const totalFormatado = totalPorTipo.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
-    const textoResposta = `✅ Gasto de ${gastoFormatado} registrado na planilha!\n\nTotal de gastos com ${tipo}: ${totalFormatado}`;
+    const textoResposta = `✅ Gasto de ${gastoFormatado} registado!\n\nTotal de gastos com ${tipo}: ${totalFormatado}`;
 
-    console.log(`Enviando resposta para ${numeroRemetente}`);
+    console.log(`A enviar resposta para ${numeroRemetente}`);
     await enviarMensagemWhatsApp(numeroRemetente, textoResposta);
 
     res.sendStatus(200);
@@ -166,8 +195,9 @@ app.post("/webhook", async (req, res) => {
   }
 });
 
-// --- INICIALIZAÇÃO DO SERVIDOR (não muda) ---
+// --- INICIALIZAÇÃO DO SERVIDOR (NÃO MUDA) ---
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
-  console.log(`Servidor rodando na porta ${PORT}`);
+  console.log(`Servidor a correr na porta ${PORT}`);
 });
+
