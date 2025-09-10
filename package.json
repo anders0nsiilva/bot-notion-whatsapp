@@ -1,16 +1,17 @@
 {
-  "name": "bot-sheets-whatsapp",
+  "name": "bot-whatsapp-web-sheets",
   "version": "1.0.0",
-  "description": "Bot que integra WhatsApp com Google Sheets",
+  "description": "Bot de finanças para WhatsApp usando whatsapp-web.js e Google Sheets",
   "main": "index.mjs",
   "type": "module",
   "scripts": {
     "start": "node index.mjs"
   },
-  "author": "",
-  "license": "ISC",
   "dependencies": {
     "express": "^4.19.2",
-    "googleapis": "^140.0.0"
+    "google-auth-library": "^9.11.0",
+    "googleapis": "^140.0.0",
+    "qrcode-terminal": "^0.12.0",
+    "whatsapp-web.js": "^1.23.0"
   }
 }
