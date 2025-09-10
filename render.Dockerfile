@@ -1,5 +1,5 @@
 # Use a imagem base do Node.js que o Render fornece
-FROM render/node:20
+FROM node:20-slim
 
 # Instala as dependências necessárias para o Puppeteer/Chrome
 RUN apt-get update && \
