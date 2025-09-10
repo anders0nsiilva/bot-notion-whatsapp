@@ -3,7 +3,9 @@
 // Importa as bibliotecas necessárias
 import express from 'express';
 import qrcode from 'qrcode-terminal';
-import { Client, LocalAuth } from 'whatsapp-web.js';
+// CORREÇÃO: Importa a biblioteca whatsapp-web.js usando a sintaxe compatível
+import pkg from 'whatsapp-web.js';
+const { Client, LocalAuth } = pkg;
 import { google } from 'googleapis';
 
 // --- CONFIGURAÇÃO INICIAL ---
@@ -14,7 +16,7 @@ const GOOGLE_SHEET_ID = process.env.GOOGLE_SHEET_ID;
 const GOOGLE_SERVICE_ACCOUNT_EMAIL = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
 const GOOGLE_PRIVATE_KEY = process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n');
 
-// --- LÓGICA DO GOOGLE SHEETS (COPIADA DO PROJETO ANTERIOR) ---
+// --- LÓGICA DO GOOGLE SHEETS (NÃO MUDA) ---
 
 async function adicionarLinhaNaPlanilha(descricao, valor, categoria, tipo) {
   const auth = new google.auth.GoogleAuth({
@@ -107,9 +109,9 @@ client.on('message', async msg => {
 
   if (partes.length !== 4) {
     // Se o formato for inválido, simplesmente ignora.
-    // Poderíamos enviar uma resposta de erro, mas vamos manter simples.
+    // Comando de teste para verificar se o bot está vivo
     if (textoDaMensagem.toLowerCase() === 'ping') {
-        msg.reply('pong'); // Comando de teste para verificar se o bot está vivo
+        msg.reply('pong'); 
     }
     return;
   }
