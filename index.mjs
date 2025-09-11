@@ -75,7 +75,7 @@ const client = new Client({
   authStrategy: new LocalAuth(),
   puppeteer: {
     headless: true,
-    executablePath: puppeteer.executablePath(), // ✅ usa o Chromium baixado pelo puppeteer
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || puppeteer.executablePath(),
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
@@ -170,3 +170,4 @@ app.listen(PORT, () => {
     `Servidor de "keep-alive" rodando na porta ${PORT} para manter o bot ativo.`
   );
 });
+
