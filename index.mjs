@@ -3,7 +3,7 @@
 // Importa as bibliotecas necessárias
 import express from 'express';
 import qrcode from 'qrcode-terminal';
-// CORREÇÃO: Importa a biblioteca whatsapp-web.js usando a sintaxe compatível
+// Sintaxe compatível para importar a biblioteca whatsapp-web.js
 import pkg from 'whatsapp-web.js';
 const { Client, LocalAuth } = pkg;
 import { google } from 'googleapis';
@@ -68,9 +68,10 @@ async function calcularTotalPorTipoNaPlanilha(tipo) {
 console.log('Iniciando o cliente do WhatsApp...');
 
 const client = new Client({
-  authStrategy: new LocalAuth(), // Salva a sessão para não precisar escanear o QR Code toda vez
+  authStrategy: new LocalAuth(),
   puppeteer: {
     headless: true,
+    executablePath: undefined, // <-- CORREÇÃO FINAL: Força a biblioteca a usar seu próprio Chromium
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
@@ -78,7 +79,7 @@ const client = new Client({
       '--disable-accelerated-2d-canvas',
       '--no-first-run',
       '--no-zygote',
-      '--single-process', // Isso é para ambientes com pouca memória como o Render
+      '--single-process',
       '--disable-gpu'
     ],
   }
@@ -97,7 +98,6 @@ client.on('ready', () => {
 
 // Evento 3: Mensagem recebida
 client.on('message', async msg => {
-  // Ignora mensagens que não sejam suas para segurança
   if (!msg.fromMe) {
     return;
   }
@@ -108,8 +108,6 @@ client.on('message', async msg => {
   const partes = textoDaMensagem.split(",").map(part => part.trim());
 
   if (partes.length !== 4) {
-    // Se o formato for inválido, simplesmente ignora.
-    // Comando de teste para verificar se o bot está vivo
     if (textoDaMensagem.toLowerCase() === 'ping') {
         msg.reply('pong'); 
     }
@@ -138,7 +136,6 @@ client.on('message', async msg => {
     const textoResposta = `✅ Gasto de ${gastoFormatado} registado!\n\nTotal de gastos com ${tipo}: ${totalFormatado}`;
     
     console.log(`A enviar resposta...`);
-    // Responde na mesma conversa onde a mensagem foi enviada
     await client.sendMessage(msg.from, textoResposta);
 
   } catch (err) {
