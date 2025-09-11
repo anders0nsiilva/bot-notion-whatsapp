@@ -1,77 +1,118 @@
 // index.mjs
-import { Client, LocalAuth } from "whatsapp-web.js";
-import qrcode from "qrcode-terminal";
-import express from "express";
-import { MongoClient } from "mongodb";
+
+// Importa as bibliotecas necessárias
+import qrcode from 'qrcode-terminal'; // Para mostrar o QR Code nos logs
+import pkg from 'whatsapp-web.js';
+const { Client, LocalAuth } = pkg;
+import { MongoClient, ServerApiVersion } from 'mongodb';
 
 // --- CONFIGURAÇÃO DO MONGODB ---
-const uri = "mongodb+srv://andersonsiilva99:EyX75uhGALtck6Ag@bot-financeiro.xdlrglh.mongodb.net/?retryWrites=true&w=majority&appName=bot-financeiro";
-const clientDB = new MongoClient(uri);
-await clientDB.connect();
-const db = clientDB.db("botFinanceiro");
-const lancamentos = db.collection("lancamentos");
+const MONGODB_URI = process.env.MONGODB_URI;
+if (!MONGODB_URI) {
+  throw new Error('A variável de ambiente MONGODB_URI não foi definida!');
+}
 
-// --- WHATSAPP BOT ---
-const client = new Client({
-  authStrategy: new LocalAuth(),
-  puppeteer: { headless: true }
+const clientDB = new MongoClient(MONGODB_URI, {
+  serverApi: {
+    version: ServerApiVersion.v1,
+    strict: true,
+    deprecationErrors: true,
+  }
 });
 
-client.on("qr", qr => {
+let db, lancamentos;
+
+async function connectToDatabase() {
+  try {
+    await clientDB.connect();
+    db = clientDB.db("botFinanceiro");
+    lancamentos = db.collection("lancamentos");
+    console.log("✅ Conectado com sucesso ao MongoDB Atlas!");
+  } catch (e) {
+    console.error("❌ Falha ao conectar ao MongoDB Atlas", e);
+    process.exit(1);
+  }
+}
+
+// --- LÓGICA DO WHATSAPP-WEB.JS ---
+
+console.log('Iniciando o cliente do WhatsApp...');
+
+const client = new Client({
+  authStrategy: new LocalAuth(),
+  puppeteer: {
+    headless: true,
+    executablePath: undefined,
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-accelerated-2d-canvas',
+      '--no-first-run',
+      '--no-zygote',
+      '--single-process',
+      '--disable-gpu'
+    ],
+  }
+});
+
+client.on('qr', qr => {
+  console.log('QR Code recebido! Escaneie com seu celular:');
+  // Gera o QR Code diretamente no terminal de logs
   qrcode.generate(qr, { small: true });
 });
 
-client.on("ready", () => {
-  console.log("🤖 Bot do WhatsApp está online!");
+client.on('ready', () => {
+  console.log('✅ Cliente do WhatsApp está pronto e conectado!');
 });
 
-client.on("message", async msg => {
+client.on('message', async msg => {
+  if (!msg.fromMe) {
+    return;
+  }
+
   const texto = msg.body.trim().toLowerCase();
+  console.log(`Mensagem sua recebida: "${texto}"`);
 
-  // Registrar lançamento ex: "gastei 50 mercado"
-  if (texto.startsWith("gastei")) {
-    const partes = texto.split(" ");
-    const valor = parseFloat(partes[1]);
-    const categoria = partes.slice(2).join(" ") || "outros";
+  try {
+    if (texto.startsWith("gastei ")) {
+      const partes = texto.split(" ");
+      if (partes.length < 3) {
+        return msg.reply("⚠️ Formato inválido. Use: gastei 50 mercado");
+      }
+      const valor = parseFloat(partes[1]);
+      const categoria = partes.slice(2).join(" ");
 
-    if (!isNaN(valor)) {
-      await lancamentos.insertOne({
-        valor,
-        categoria,
-        data: new Date()
-      });
-      msg.reply(`✅ Lançamento registrado: R$${valor.toFixed(2)} em ${categoria}`);
-    } else {
-      msg.reply("⚠️ Não entendi o valor. Use: gastei 50 mercado");
+      if (!isNaN(valor)) {
+        await lancamentos.insertOne({ valor, categoria, data: new Date() });
+        msg.reply(`✅ Lançamento registrado: R$${valor.toFixed(2)} em ${categoria}`);
+      } else {
+        msg.reply("⚠️ Não entendi o valor. Use: gastei 50 mercado");
+      }
     }
-  }
-
-  // Consultar total
-  else if (texto === "total") {
-    const gastos = await lancamentos.aggregate([
-      { $group: { _id: null, total: { $sum: "$valor" } } }
-    ]).toArray();
-
-    const total = gastos.length > 0 ? gastos[0].total : 0;
-    msg.reply(`💰 Seu total de gastos é: R$${total.toFixed(2)}`);
-  }
-
-  // Consultar por categoria
-  else if (texto.startsWith("total ")) {
-    const categoria = texto.replace("total ", "");
-    const gastos = await lancamentos.aggregate([
-      { $match: { categoria } },
-      { $group: { _id: null, total: { $sum: "$valor" } } }
-    ]).toArray();
-
-    const total = gastos.length > 0 ? gastos[0].total : 0;
-    msg.reply(`📊 Total em ${categoria}: R$${total.toFixed(2)}`);
+    else if (texto === "total") {
+      const gastos = await lancamentos.aggregate([{ $group: { _id: null, total: { $sum: "$valor" } } }]).toArray();
+      const total = gastos.length > 0 ? gastos[0].total : 0;
+      msg.reply(`💰 Seu total de gastos é: R$${total.toFixed(2)}`);
+    }
+    else if (texto.startsWith("total ")) {
+      const categoria = texto.replace("total ", "");
+      const gastos = await lancamentos.aggregate([{ $match: { categoria } }, { $group: { _id: null, total: { $sum: "$valor" } } }]).toArray();
+      const total = gastos.length > 0 ? gastos[0].total : 0;
+      msg.reply(`📊 Total em ${categoria}: R$${total.toFixed(2)}`);
+    }
+  } catch (err) {
+    console.error("Erro ao processar comando:", err.message);
+    msg.reply(`🤖 Ocorreu um erro no banco de dados.`);
   }
 });
 
-// --- API EXPRESS (opcional para Render pingar e manter ativo) ---
-const app = express();
-app.get("/", (req, res) => res.send("Bot financeiro rodando 🚀"));
-app.listen(3000, () => console.log("Servidor web ativo na porta 3000"));
+// --- INICIALIZAÇÃO ---
 
-client.initialize();
+async function start() {
+  await connectToDatabase();
+  await client.initialize();
+  console.log("Bot inicializado e pronto para receber mensagens.");
+}
+
+start();
