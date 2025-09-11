@@ -1,182 +1,77 @@
 // index.mjs
+import { Client, LocalAuth } from "whatsapp-web.js";
+import qrcode from "qrcode-terminal";
+import express from "express";
+import { MongoClient } from "mongodb";
 
-// Importa as bibliotecas necessárias
-import express from 'express';
-import qrcode from 'qrcode';
-import qrcodeTerminal from 'qrcode-terminal';
-import pkg from 'whatsapp-web.js';
-const { Client, LocalAuth } = pkg;
-import { google } from 'googleapis';
+// --- CONFIGURAÇÃO DO MONGODB ---
+const uri = "mongodb+srv://andersonsiilva99:EyX75uhGALtck6Ag@bot-financeiro.xdlrglh.mongodb.net/?retryWrites=true&w=majority&appName=bot-financeiro";
+const clientDB = new MongoClient(uri);
+await clientDB.connect();
+const db = clientDB.db("botFinanceiro");
+const lancamentos = db.collection("lancamentos");
 
-// --- CONFIGURAÇÃO INICIAL ---
-const app = express();
-
-let qrAtual = null; // Guardar QR code atual
-
-// Carrega as credenciais para a API do Google Sheets.
-const GOOGLE_SHEET_ID = process.env.GOOGLE_SHEET_ID;
-const GOOGLE_SERVICE_ACCOUNT_EMAIL = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-const GOOGLE_PRIVATE_KEY = process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n');
-
-// --- LÓGICA DO GOOGLE SHEETS ---
-async function adicionarLinhaNaPlanilha(descricao, valor, categoria, tipo) {
-  const auth = new google.auth.GoogleAuth({
-    credentials: {
-      client_email: GOOGLE_SERVICE_ACCOUNT_EMAIL,
-      private_key: GOOGLE_PRIVATE_KEY,
-    },
-    scopes: ["https://www.googleapis.com/auth/spreadsheets"],
-  });
-  const sheets = google.sheets({ version: "v4", auth });
-  const novaLinha = [new Date().toISOString(), descricao, valor, categoria, tipo];
-  await sheets.spreadsheets.values.append({
-    spreadsheetId: GOOGLE_SHEET_ID,
-    range: "Página1!A:E",
-    valueInputOption: "USER_ENTERED",
-    resource: { values: [novaLinha] },
-  });
-}
-
-async function calcularTotalPorTipoNaPlanilha(tipo) {
-  const auth = new google.auth.GoogleAuth({
-    credentials: {
-      client_email: GOOGLE_SERVICE_ACCOUNT_EMAIL,
-      private_key: GOOGLE_PRIVATE_KEY,
-    },
-    scopes: ["https://www.googleapis.com/auth/spreadsheets"],
-  });
-  const sheets = google.sheets({ version: "v4", auth });
-  const resposta = await sheets.spreadsheets.values.get({
-    spreadsheetId: GOOGLE_SHEET_ID,
-    range: "Página1!C:E",
-  });
-  const linhas = resposta.data.values;
-  if (!linhas || linhas.length === 0) return 0;
-  return linhas.reduce((soma, linha) => {
-    if (linha && linha.length > 2) {
-      const valorDaLinha = parseFloat(String(linha[0]).replace(",", ".") || 0);
-      const tipoDaLinha = linha[2];
-      if (
-        tipoDaLinha &&
-        tipoDaLinha.toLowerCase() === tipo.toLowerCase() &&
-        !isNaN(valorDaLinha)
-      ) {
-        return soma + valorDaLinha;
-      }
-    }
-    return soma;
-  }, 0);
-}
-
-// --- LÓGICA DO WHATSAPP-WEB.JS ---
-
-console.log("Iniciando o cliente do WhatsApp...");
-
+// --- WHATSAPP BOT ---
 const client = new Client({
   authStrategy: new LocalAuth(),
-  puppeteer: {
-    headless: true,
-    executablePath: "/usr/bin/chromium",
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-accelerated-2d-canvas",
-      "--no-first-run",
-      "--no-zygote",
-      "--single-process",
-      "--disable-gpu",
-    ],
-  },
+  puppeteer: { headless: true }
 });
 
-// Evento 1: Geração do QR Code
-client.on("qr", async (qr) => {
-  console.log("QR Code recebido! Escaneie com seu celular:");
-  qrcodeTerminal.generate(qr, { small: true }); // continua mostrando no console
-  qrAtual = await qrcode.toDataURL(qr); // guarda versão em imagem
+client.on("qr", qr => {
+  qrcode.generate(qr, { small: true });
 });
 
-// Evento 2: Cliente autenticado e pronto
 client.on("ready", () => {
-  console.log("✅ Cliente do WhatsApp está pronto e conectado!");
+  console.log("🤖 Bot do WhatsApp está online!");
 });
 
-// Evento 3: Mensagem recebida
-client.on("message", async (msg) => {
-  if (!msg.fromMe) {
-    return;
+client.on("message", async msg => {
+  const texto = msg.body.trim().toLowerCase();
+
+  // Registrar lançamento ex: "gastei 50 mercado"
+  if (texto.startsWith("gastei")) {
+    const partes = texto.split(" ");
+    const valor = parseFloat(partes[1]);
+    const categoria = partes.slice(2).join(" ") || "outros";
+
+    if (!isNaN(valor)) {
+      await lancamentos.insertOne({
+        valor,
+        categoria,
+        data: new Date()
+      });
+      msg.reply(`✅ Lançamento registrado: R$${valor.toFixed(2)} em ${categoria}`);
+    } else {
+      msg.reply("⚠️ Não entendi o valor. Use: gastei 50 mercado");
+    }
   }
 
-  const textoDaMensagem = msg.body;
-  console.log(`Mensagem sua recebida: "${textoDaMensagem}"`);
+  // Consultar total
+  else if (texto === "total") {
+    const gastos = await lancamentos.aggregate([
+      { $group: { _id: null, total: { $sum: "$valor" } } }
+    ]).toArray();
 
-  const partes = textoDaMensagem.split(",").map((part) => part.trim());
-
-  if (partes.length !== 4) {
-    if (textoDaMensagem.toLowerCase() === "ping") {
-      msg.reply("pong");
-    }
-    return;
+    const total = gastos.length > 0 ? gastos[0].total : 0;
+    msg.reply(`💰 Seu total de gastos é: R$${total.toFixed(2)}`);
   }
 
-  try {
-    let [descricao, valorStr, categoria, tipo] = partes;
-    categoria =
-      categoria.charAt(0).toUpperCase() + categoria.slice(1).toLowerCase();
-    tipo = tipo.charAt(0).toUpperCase() + tipo.slice(1).toLowerCase();
-    const valor = parseFloat(valorStr.replace(",", "."));
+  // Consultar por categoria
+  else if (texto.startsWith("total ")) {
+    const categoria = texto.replace("total ", "");
+    const gastos = await lancamentos.aggregate([
+      { $match: { categoria } },
+      { $group: { _id: null, total: { $sum: "$valor" } } }
+    ]).toArray();
 
-    if (isNaN(valor)) {
-      await client.sendMessage(
-        msg.from,
-        `❌ O valor "${valorStr}" não é um número.`
-      );
-      return;
-    }
-
-    console.log("A adicionar linha na planilha...");
-    await adicionarLinhaNaPlanilha(descricao, valor, categoria, tipo);
-    const gastoFormatado = valor.toLocaleString("pt-BR", {
-      style: "currency",
-      currency: "BRL",
-    });
-
-    console.log(`A consultar planilha para o total de: ${tipo}`);
-    const totalPorTipo = await calcularTotalPorTipoNaPlanilha(tipo);
-    const totalFormatado = totalPorTipo.toLocaleString("pt-BR", {
-      style: "currency",
-      currency: "BRL",
-    });
-
-    const textoResposta = `✅ Gasto de ${gastoFormatado} registado!\n\nTotal de gastos com ${tipo}: ${totalFormatado}`;
-
-    console.log(`A enviar resposta...`);
-    await client.sendMessage(msg.from, textoResposta);
-  } catch (err) {
-    console.error("Erro ao processar a mensagem:", err.message);
-    await client.sendMessage(
-      msg.from,
-      `🤖 Ocorreu um erro: ${err.message}`
-    );
+    const total = gastos.length > 0 ? gastos[0].total : 0;
+    msg.reply(`📊 Total em ${categoria}: R$${total.toFixed(2)}`);
   }
 });
 
-// Inicia o cliente do WhatsApp
+// --- API EXPRESS (opcional para Render pingar e manter ativo) ---
+const app = express();
+app.get("/", (req, res) => res.send("Bot financeiro rodando 🚀"));
+app.listen(3000, () => console.log("Servidor web ativo na porta 3000"));
+
 client.initialize();
-
-// --- SERVIDOR EXPRESS PARA MOSTRAR O QR CODE ---
-app.get("/", (req, res) => {
-  if (qrAtual) {
-    res.send(`<h2>Escaneie o QR Code abaixo:</h2><img src="${qrAtual}" />`);
-  } else {
-    res.send("Nenhum QR Code disponível no momento. Aguarde...");
-  }
-});
-
-const PORT = process.env.PORT || 8080;
-app.listen(PORT, () => {
-  console.log(
-    `Servidor rodando na porta ${PORT} - acesse / para visualizar o QR Code`
-  );
-});
