@@ -2,15 +2,16 @@
 
 // Importa as bibliotecas necessárias
 import express from 'express';
-import qrcode from 'qrcode-terminal';
-// Sintaxe compatível para importar a biblioteca whatsapp-web.js
+import qrcode from 'qrcode';
+import qrcodeTerminal from 'qrcode-terminal';
 import pkg from 'whatsapp-web.js';
 const { Client, LocalAuth } = pkg;
 import { google } from 'googleapis';
-import puppeteer from 'puppeteer';
 
 // --- CONFIGURAÇÃO INICIAL ---
 const app = express();
+
+let qrAtual = null; // Guardar QR code atual
 
 // Carrega as credenciais para a API do Google Sheets.
 const GOOGLE_SHEET_ID = process.env.GOOGLE_SHEET_ID;
@@ -90,9 +91,10 @@ const client = new Client({
 });
 
 // Evento 1: Geração do QR Code
-client.on("qr", (qr) => {
+client.on("qr", async (qr) => {
   console.log("QR Code recebido! Escaneie com seu celular:");
-  qrcode.generate(qr, { small: true });
+  qrcodeTerminal.generate(qr, { small: true }); // continua mostrando no console
+  qrAtual = await qrcode.toDataURL(qr); // guarda versão em imagem
 });
 
 // Evento 2: Cliente autenticado e pronto
@@ -163,12 +165,18 @@ client.on("message", async (msg) => {
 // Inicia o cliente do WhatsApp
 client.initialize();
 
-// Mantém o servidor web rodando para o Render não desligar o serviço
+// --- SERVIDOR EXPRESS PARA MOSTRAR O QR CODE ---
+app.get("/", (req, res) => {
+  if (qrAtual) {
+    res.send(`<h2>Escaneie o QR Code abaixo:</h2><img src="${qrAtual}" />`);
+  } else {
+    res.send("Nenhum QR Code disponível no momento. Aguarde...");
+  }
+});
+
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
   console.log(
-    `Servidor de "keep-alive" rodando na porta ${PORT} para manter o bot ativo.`
+    `Servidor rodando na porta ${PORT} - acesse / para visualizar o QR Code`
   );
 });
-
-
