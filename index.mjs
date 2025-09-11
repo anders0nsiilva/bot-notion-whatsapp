@@ -1,7 +1,7 @@
-// index.mjs
+//// index.mjs
 
 // Importa as bibliotecas necessárias
-import qrcode from 'qrcode-terminal'; // Para mostrar o QR Code nos logs
+import qrcode from 'qrcode-terminal';
 import pkg from 'whatsapp-web.js';
 const { Client, LocalAuth } = pkg;
 import { MongoClient, ServerApiVersion } from 'mongodb';
@@ -58,7 +58,6 @@ const client = new Client({
 
 client.on('qr', qr => {
   console.log('QR Code recebido! Escaneie com seu celular:');
-  // Gera o QR Code diretamente no terminal de logs
   qrcode.generate(qr, { small: true });
 });
 
